@@ -1,6 +1,5 @@
 # imports
 using Plots
-using PlutoUI
 using LinearAlgebra
 using Distributions
 
@@ -394,6 +393,49 @@ pplot(points) = plot(X(points), Y(points), Z(points))
 pplot!(points) = plot!(X(points), Y(points), Z(points))
 pscatter(points) = scatter(X(points), Y(points), Z(points))
 pscatter!(points) = scatter!(X(points), Y(points), Z(points))
+
+function inverseALPLeg(x, y, z)
+	l1::Float64 = 20  # horizontal offset from servos
+	l2::Float64 = 20  # vertical offset from servos
+	l3::Float64 = 100 # upper leg length
+	l4::Float64 = 110 # lower leg length
+	l5::Float64 = 25  # servo arm length
+	l6::Float64 = 50  # first servo linkage length
+	l7::Float64 = 40  # depth difference between shoulder servo and rest of leg
+	f = norm([z, y])
+	ξ = atan(-sqrt(f^2 - l7^2), l7) - atan(y, z)
+	𝓍 = x - l1 # offset due to shoulder not being at origin
+	𝓎 = y - l2 + z*sin(ξ) + y*cos(ξ) - y # offset due to shoulder and x-axis rotation (θ1) causing a y offset
+	γ = atan(𝓎, 𝓍)
+	e = norm([𝓍, 𝓎])
+	δ = acos((l3^2 + e^2 - l4^2) / (2*l3*e))
+	ϵ = acos((l3^2 + l4^2 - e^2) / (2*l3*l4))
+	origin = [0.0, 0.0]
+	shoulder = [l1, l2]
+
+	θ1 = -acos(l7/f) - atan(y, z)
+	θ2 = π/2 + γ + δ
+	θ3 =  ϵ - π/2
+
+	knee = shoulder + l3*[cos(θ2-π/2), sin(θ2-π/2)]
+	foot = knee + l4*[cos(θ2+θ3-π), sin(θ2+θ3-π)]
+	points = [origin, shoulder, knee, foot]
+
+	α = θ2 + θ3 + π/2
+	Q = shoulder + l5 * unit(α)
+	S = shoulder + l5 * unit(α - π/2)
+	T = knee + l5 * unit(θ2 + θ3)
+
+	d = norm(shoulder)
+	n = norm(Q - origin)
+
+	β1 = acos((l5^2 + n^2 - l6^2) / (2*l5*n))
+	β2 = acos((d^2 + n^2 - l5^2) / (2*d*n))
+	β = β1 + β2 + π/4
+
+	R = l5 * unit(β)
+	return [θ1, θ2, θ3, α, ξ]
+end
 
 # cut out but may be useful later
 
