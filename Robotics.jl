@@ -69,9 +69,9 @@ p(T) = T[:, 4]
 function inverseTransformationMatrix(T::Array{Float64, 2})
 	Ti = zeros(4, 4)
 	Ti[1:3, 1:3] = Transpose(R(T))
-	Ti[1, 4] = -dot(R(T)[1:3, 1], p(T))
-	Ti[2, 4] = -dot(R(T)[1:3, 2], p(T))
-	Ti[3, 4] = -dot(R(T)[1:3, 3], p(T))
+	Ti[1, 4] = -dot(R(T)[:, 1], p(T)[1:3])
+	Ti[2, 4] = -dot(R(T)[:, 2], p(T)[1:3])
+	Ti[3, 4] = -dot(R(T)[:, 3], p(T)[1:3])
 	Ti[4, 4] = 1
 	return Ti
 end
@@ -190,8 +190,9 @@ end
 # Plotting
 
 # This function takes an array of transformation matrices `Ts` and plots a graph of the coordinate frames at each joint as well as the joints. This is set within the plot `limits`."
-function plotKC(Ts::Array{Array{Float64, 2}, 1}, limits)
+function plotKC(Ts::Array{Array{Float64, 2}, 1}, limits, Tinit)
 	l = length(Ts)
+	Ts = [Tinit * T for T in Ts]
 	p = plotJoints(Ts, limits)
 	for index = 1:l
 		showAxis!(p, Ts[index], limits)
@@ -199,9 +200,24 @@ function plotKC(Ts::Array{Array{Float64, 2}, 1}, limits)
 	p
 end
 
+# This function takes an array of transformation matrices `Ts` and plots a graph of the coordinate frames at each joint as well as the joints. This is set within the plot `limits`."
+function plotKC!(Ts::Array{Array{Float64, 2}, 1}, limits, Tinit)
+	l = length(Ts)
+	Ts = [Tinit * T for T in Ts]
+	p = plotJoints!(Ts, limits)
+	for index = 1:l
+		showAxis!(p, Ts[index], limits)
+	end
+	p
+end
+
 # This function takes a `KinematicChain` and parameters `θ` and plots a graph of the coordinate frames at each joint as well as the joints. You can provide offset parameters `θ0`.
-function plotKC(C::KinematicChain, θ, θ0=[])
-	plotKC(transformationsDH(C, length(θ) == length(θ0) ? θ - θ0 : θ), (-C.range, C.range))
+function plotKC(C::KinematicChain, θ, Tinit=eye(4), θ0=[])
+	plotKC(transformationsDH(C, length(θ) == length(θ0) ? θ - θ0 : θ), (-C.range, C.range), Tinit)
+end
+
+function plotKC!(C::KinematicChain, θ, Tinit=eye(4), θ0=[])
+	plotKC!(transformationsDH(C, length(θ) == length(θ0) ? θ - θ0 : θ), (-C.range, C.range), Tinit)
 end
 
 # Displays the axis at a reference frame given by a transformation matrix `T`. Takes the parameter `plot` for the plot to draw in, this plot has to be actively displayed afterwards. Also takes the plot `limits` which dictate the length of the axis to make sure it is adequate.
@@ -224,6 +240,15 @@ function plotJoints(Ts::Array{Array{Float64, 2}, 1}, lims)
 	yCord = [Ts[index][2, 4] for index = 1:l]
 	zCord = [Ts[index][3, 4] for index = 1:l]
 	plot(xCord, yCord, zCord, lims=lims, color=:black, linewidth=4, legend=false)
+	scatter!(xCord, yCord, zCord, color=:white)
+end
+
+function plotJoints!(Ts::Array{Array{Float64, 2}, 1}, lims)
+	l = length(Ts)
+	xCord = [Ts[index][1, 4] for index = 1:l]
+	yCord = [Ts[index][2, 4] for index = 1:l]
+	zCord = [Ts[index][3, 4] for index = 1:l]
+	plot!(xCord, yCord, zCord, lims=lims, color=:black, linewidth=4, legend=false)
 	scatter!(xCord, yCord, zCord, color=:white)
 end
 
@@ -394,47 +419,47 @@ pplot!(points) = plot!(X(points), Y(points), Z(points))
 pscatter(points) = scatter(X(points), Y(points), Z(points))
 pscatter!(points) = scatter!(X(points), Y(points), Z(points))
 
-function inverseALPLeg(x, y, z)
-	l1::Float64 = 20  # horizontal offset from servos
-	l2::Float64 = 20  # vertical offset from servos
-	l3::Float64 = 100 # upper leg length
-	l4::Float64 = 110 # lower leg length
-	l5::Float64 = 25  # servo arm length
-	l6::Float64 = 50  # first servo linkage length
-	l7::Float64 = 40  # depth difference between shoulder servo and rest of leg
+ALPConstants = [20, 20, 100, 110, 40]
+
+ALPLeg = KinematicChain([
+		[ALPConstants[1], ALPConstants[2], ALPConstants[5], 1.0],
+		[0, -ALPConstants[3], 0, 1.0],
+		[-ALPConstants[4], 0, 0, 1.0]
+	], [
+		xhat,
+		zhat,
+		zhat
+	], sum(ALPConstants[1:4])
+)
+
+function inverseALPLeg(xglobal, yglobal, zglobal, Toff)
+	l1 = ALPConstants[1] # horizontal offset from servos
+	l2 = ALPConstants[2] # vertical offset from servos
+	l3 = ALPConstants[3] # upper leg length
+	l4 = ALPConstants[4] # lower leg length
+	l5 = ALPConstants[5] # depth difference between shoulder servo and rest of leg
+
+	point = inverseTransformationMatrix(Toff) * [xglobal, yglobal, zglobal, 1]
+	x = point[1]
+	y = point[2]
+	z = point[3]
+
 	f = norm([z, y])
-	ξ = atan(-sqrt(f^2 - l7^2), l7) - atan(y, z)
+	ξ = atan(-sqrt(f^2 - l5^2), l5) - atan(y, z)
+
+	θ1 = -acos(l5/f) - atan(y, z)
+
 	𝓍 = x - l1 # offset due to shoulder not being at origin
 	𝓎 = y - l2 + z*sin(ξ) + y*cos(ξ) - y # offset due to shoulder and x-axis rotation (θ1) causing a y offset
 	γ = atan(𝓎, 𝓍)
 	e = norm([𝓍, 𝓎])
 	δ = acos((l3^2 + e^2 - l4^2) / (2*l3*e))
 	ϵ = acos((l3^2 + l4^2 - e^2) / (2*l3*l4))
-	origin = [0.0, 0.0]
-	shoulder = [l1, l2]
 
-	θ1 = -acos(l7/f) - atan(y, z)
 	θ2 = π/2 + γ + δ
 	θ3 =  ϵ - π/2
 
-	knee = shoulder + l3*[cos(θ2-π/2), sin(θ2-π/2)]
-	foot = knee + l4*[cos(θ2+θ3-π), sin(θ2+θ3-π)]
-	points = [origin, shoulder, knee, foot]
-
-	α = θ2 + θ3 + π/2
-	Q = shoulder + l5 * unit(α)
-	S = shoulder + l5 * unit(α - π/2)
-	T = knee + l5 * unit(θ2 + θ3)
-
-	d = norm(shoulder)
-	n = norm(Q - origin)
-
-	β1 = acos((l5^2 + n^2 - l6^2) / (2*l5*n))
-	β2 = acos((d^2 + n^2 - l5^2) / (2*d*n))
-	β = β1 + β2 + π/4
-
-	R = l5 * unit(β)
-	return [θ1, θ2, θ3, α, ξ]
+	return [θ1, θ2, θ3]
 end
 
 # cut out but may be useful later
